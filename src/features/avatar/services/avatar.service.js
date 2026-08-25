@@ -24,6 +24,9 @@ export function createAvatarService() {
   let generation = 0
   let speechGeneration = 0
   let speechUtterance = null
+  let mouthAnimationTimer = null
+  let activeHead = null
+  let pendingHead = null
   let speechVolume = 0.8
   let onVoiceStateChange = () => {}
 
@@ -41,22 +44,47 @@ export function createAvatarService() {
       || null
   }
 
+  function stopMouthAnimation(head = activeHead) {
+    if (mouthAnimationTimer) {
+      clearInterval(mouthAnimationTimer)
+      mouthAnimationTimer = null
+    }
+    head?.setValue?.('mouthOpen', 0, 120)
+  }
+
+  function startMouthAnimation(head, currentGeneration) {
+    stopMouthAnimation(head)
+    if (!head?.setValue) return
+
+    const animateMouth = () => {
+      if (currentGeneration !== speechGeneration || activeHead !== head) return
+      const phase = Date.now() / 150
+      const value = 0.08 + Math.abs(Math.sin(phase)) * 0.42
+      head.setValue('mouthOpen', value, 110)
+    }
+
+    animateMouth()
+    mouthAnimationTimer = setInterval(animateMouth, 120)
+  }
+
   function stopSpeech() {
     speechGeneration += 1
     speechUtterance = null
+    stopMouthAnimation()
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel()
     }
     onVoiceStateChange('end')
   }
 
-  function speak(text) {
+  function speak(text, head) {
     const content = String(text || '').trim()
     if (!content) return
 
     const synth = getSpeechSynthesis()
     const utterance = new window.SpeechSynthesisUtterance(content)
     const currentGeneration = ++speechGeneration
+    stopMouthAnimation(head)
     speechUtterance = utterance
     utterance.lang = 'zh-CN'
     utterance.rate = 1
@@ -65,15 +93,18 @@ export function createAvatarService() {
     utterance.voice = chooseChineseVoice(synth)
     utterance.onstart = () => {
       if (currentGeneration !== speechGeneration) return
+      startMouthAnimation(head, currentGeneration)
       onVoiceStateChange('start')
     }
     utterance.onend = () => {
       if (currentGeneration !== speechGeneration) return
+      stopMouthAnimation(head)
       speechUtterance = null
       onVoiceStateChange('end')
     }
     utterance.onerror = (event) => {
       if (currentGeneration !== speechGeneration) return
+      stopMouthAnimation(head)
       speechUtterance = null
       onVoiceStateChange('end')
       if (event.error !== 'canceled' && event.error !== 'interrupted') {
@@ -108,28 +139,37 @@ export function createAvatarService() {
       avatarMood: 'neutral',
       modelPixelRatio: Math.min(window.devicePixelRatio || 1, 2)
     })
+    pendingHead = head
 
-    await head.showAvatar({
-      url: config.avatarUrl,
-      body: config.body,
-      lipsyncLang: config.lipsyncLanguage || 'en'
-    }, (progress) => {
-      if (currentGeneration !== generation) return
-      options.onProgress?.(progress)
-    })
+    try {
+      await head.showAvatar({
+        url: config.avatarUrl,
+        body: config.body,
+        lipsyncLang: config.lipsyncLanguage || 'en'
+      }, (progress) => {
+        if (currentGeneration !== generation) return
+        options.onProgress?.(progress)
+      })
+    } catch (error) {
+      head.stop?.()
+      throw error
+    } finally {
+      if (pendingHead === head) pendingHead = null
+    }
 
     if (currentGeneration !== generation) {
       head.stop?.()
       throw new Error('数字人连接已取消')
     }
 
+    activeHead = head
     const adapter = {
       engine: head,
       setVolume(value) {
         speechVolume = Math.min(1, Math.max(0, Number(value)))
       },
       speak(text) {
-        speak(text)
+        speak(text, head)
       },
       stopSpeak,
       listen() {
@@ -150,6 +190,7 @@ export function createAvatarService() {
         generation += 1
         stopSpeech()
         head.stop?.()
+        if (activeHead === head) activeHead = null
         container.replaceChildren()
         if (instance === adapter) instance = null
       }
@@ -164,6 +205,9 @@ export function createAvatarService() {
   }
 
   function disconnect() {
+    generation += 1
+    pendingHead?.stop?.()
+    pendingHead = null
     instance?.destroy()
     instance = null
   }
