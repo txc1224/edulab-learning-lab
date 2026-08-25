@@ -1,0 +1,74 @@
+{
+  "defaultProvider": "deepseek",
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "endpoint": "https://api.deepseek.com/v1/chat/completions",
+      "devEndpoint": "/llm-proxy/deepseek/v1/chat/completions",
+      "devProxy": {
+        "prefix": "/llm-proxy/deepseek",
+        "target": "https://api.deepseek.com",
+        "upstreamPath": ""
+      },
+      "defaultModel": "deepseek-v4-flash",
+      "models": [
+        { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash" },
+        { "id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro" },
+        { "id": "deepseek-v4-flash-vision-exp", "name": "DeepSeek V4 Flash Vision Exp" }
+      ],
+      "requestDefaults": {}
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "endpoint": "https://api.kimi.com/coding/v1/chat/completions",
+      "devEndpoint": "/llm-proxy/kimi/v1/chat/completions",
+      "devProxy": {
+        "prefix": "/llm-proxy/kimi",
+        "target": "https://api.kimi.com",
+        "upstreamPath": "/coding"
+      },
+      "defaultModel": "k3",
+      "models": [
+        {
+          "id": "k3",
+          "name": "Kimi K3",
+          "completionTokenParam": "max_completion_tokens",
+          "requestDefaults": {
+            "reasoning_effort": "max",
+            "max_completion_tokens": 8192
+          }
+        },
+        {
+          "id": "k3-256k",
+          "name": "Kimi K3 256K",
+          "completionTokenParam": "max_completion_tokens",
+          "requestDefaults": {
+            "reasoning_effort": "max",
+            "max_completion_tokens": 8192
+          }
+        },
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi K2.7 Code",
+          "completionTokenParam": "max_tokens",
+          "requestDefaults": {
+            "thinking": { "type": "enabled" }
+          }
+        },
+        {
+          "id": "kimi-for-coding-highspeed",
+          "name": "Kimi K2.7 Code HighSpeed",
+          "completionTokenParam": "max_tokens",
+          "requestDefaults": {
+            "thinking": { "type": "enabled" }
+          }
+        }
+      ],
+      "requestDefaults": {
+        "temperature": 1
+      }
+    }
+  ]
+}
