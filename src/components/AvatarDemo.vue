@@ -4,18 +4,22 @@
       <div
         ref="avatarContainer"
         class="avatar-box"
-        :class="{ 'avatar-loading': isAvatarLoading, 'avatar-empty': !avatarInstance && !isAvatarInitializing }"
+        :class="{
+          'avatar-loading': isAvatarLoading,
+          'avatar-empty': !isAvatarConnected && !isAvatarInitializing,
+          'avatar-ready': isAvatarConnected || isAvatarInitializing
+        }"
         :style="{ background: currentBgStyle }"
       >
         <div v-if="isAvatarLoading" class="loading-mask">
           <div class="loading-spinner"></div>
           <p class="loading-text">{{ loadingText }}</p>
         </div>
-        <div v-if="!avatarInstance && !isAvatarInitializing" class="empty-avatar">
+        <div v-if="!isAvatarConnected && !isAvatarInitializing" class="empty-avatar">
           <div class="empty-avatar-icon">🤖</div>
           <h3>数字人未连接</h3>
           <p>点击下方「连接」按钮加载数字人</p>
-          <p class="empty-hint">模型在浏览器中加载，语音使用系统中文 TTS</p>
+          <p class="empty-hint">模型在浏览器中加载，语音使用系统普通话 TTS</p>
         </div>
         <div v-if="subtitleText" class="subtitle-bar">
           <p>{{ subtitleText }}</p>
@@ -29,7 +33,7 @@
         <span class="companion-name">小星</span>
         <span class="status-divider"></span>
         <button
-          v-if="avatarInstance && !isAvatarInitializing"
+          v-if="isAvatarConnected && !isAvatarInitializing"
           class="link-btn"
           @click="handleDisconnect"
         >
@@ -119,7 +123,13 @@
             {{ isThinking ? '思考中...' : '发送' }}
           </button>
         </div>
-        <p v-if="configError" class="api-hint error">
+        <p v-if="voiceError" class="api-hint error">
+          🔊 {{ voiceError }}
+        </p>
+        <p v-else-if="ttsProgressText" class="api-hint">
+          🔊 {{ ttsProgressText }}
+        </p>
+        <p v-else-if="configError" class="api-hint error">
           ⚠️ {{ configError }}
         </p>
         <p v-else-if="apiKeyError" class="api-hint error">
@@ -146,6 +156,19 @@
       </div>
 
       <div class="settings">
+        <div class="setting-item">
+          <label>人物</label>
+          <select
+            v-model="selectedAvatarId"
+            class="model-select"
+            :disabled="isConfigLoading || isAvatarInitializing || isAvatarConnected || !avatarOptions.length"
+            title="请先断开当前人物，再切换模型"
+          >
+            <option v-for="avatar in avatarOptions" :key="avatar.id" :value="avatar.id">
+              {{ avatar.name }}
+            </option>
+          </select>
+        </div>
         <div class="setting-item">
           <label>提供商</label>
           <select
@@ -224,7 +247,7 @@
             step="0.1"
             class="volume-slider"
             @input="handleVolumeChange"
-            :disabled="!avatarInstance"
+            :disabled="isConfigLoading"
           />
           <span class="volume-value">{{ Math.round(volume * 100) }}%</span>
         </div>
@@ -262,6 +285,7 @@ import { useAvatarStore } from '../stores/avatar.store.js'
 const avatarContainer = ref(null)
 const chatMessagesRef = ref(null)
 const avatarInstance = ref(null)
+const hasAvatarCanvas = ref(false)
 const avatarStore = useAvatarStore()
 const avatarService = createAvatarService()
 const isAvatarInitializing = ref(false)
@@ -282,12 +306,21 @@ const inputText = ref('')
 const isThinking = ref(false)
 const isReasoning = ref(false)
 const apiKeyError = ref('')
+const voiceError = ref('')
+const ttsProgressText = ref('')
 const configError = ref('')
 const isConfigLoading = ref(false)
 const selectedProvider = ref('')
 const selectedModel = ref('')
 const apiKeyInput = ref('')
 const providers = ref([])
+const avatarOptions = ref([])
+const selectedAvatarId = ref('brunette')
+let avatarCanvasObserver = null
+
+const isAvatarConnected = computed(() => {
+  return Boolean(avatarInstance.value || hasAvatarCanvas.value)
+})
 
 const chatService = createChatService()
 
@@ -339,6 +372,7 @@ const currentBgStyle = computed(() => {
 const statusClass = computed(() => {
   if (isAvatarInitializing.value || isAvatarLoading.value) return 'status-loading'
   if (isThinking.value) return 'status-thinking'
+  if (isAvatarConnected.value) return 'status-online'
   if (sdkStatus.value === 0 || sdkStatus.value === 6) return 'status-online'
   if (sdkStatus.value === 5) return 'status-loading'
   if (sdkStatus.value === -1 || sdkStatus.value === 4 || sdkStatus.value === 7) return 'status-offline'
@@ -348,6 +382,7 @@ const statusClass = computed(() => {
 const statusText = computed(() => {
   if (isAvatarInitializing.value) return '数字人初始化中...'
   if (isThinking.value) return '思考中...'
+  if (isAvatarConnected.value) return '在线'
   if (sdkStatus.value === 0 || sdkStatus.value === 6) return '在线'
   if (sdkStatus.value === 1) return '离线'
   if (sdkStatus.value === 2) return '网络已连接'
@@ -424,14 +459,19 @@ async function initAvatar() {
   isAvatarInitializing.value = true
   avatarStore.setInitializing(true)
   avatarStore.setError('')
+  voiceError.value = ''
   isAvatarLoading.value = true
   loadingText.value = '加载免费数字人...'
 
   try {
     const config = await loadAvatarConfig()
+    const selectedAvatar = (config.avatars || []).find((avatar) => avatar.id === selectedAvatarId.value)
+    avatarService.setTtsConfig(config.tts)
     loadingText.value = '下载人物模型...'
     avatarInstance.value = await avatarService.connect({
       ...config,
+      ...(selectedAvatar || {}),
+      avatarUrl: selectedAvatar?.url || config.avatarUrl,
       container: avatarContainer.value
     }, {
       onProgress(progress) {
@@ -440,17 +480,25 @@ async function initAvatar() {
       },
       onVoiceStateChange(status) {
         isSpeaking.value = status === 'start'
+        if (status === 'start') voiceError.value = ''
         if (status === 'end') subtitleText.value = ''
+      },
+      onVoiceError(message) {
+        voiceError.value = message
+        ttsProgressText.value = ''
       }
     })
 
     avatarInstance.value.setVolume(volume.value)
     sdkStatus.value = 0
     avatarInstance.value.idle()
+    hasAvatarCanvas.value = true
   } catch (err) {
     console.error('免费数字人初始化失败：', err)
+    avatarService.disconnect()
     avatarStore.setError(err.message || '数字人初始化失败')
     avatarInstance.value = null
+    hasAvatarCanvas.value = false
   } finally {
     isAvatarInitializing.value = false
     avatarStore.setInitializing(false)
@@ -459,33 +507,33 @@ async function initAvatar() {
 }
 
 function stopSpeak() {
-  if (avatarInstance.value) {
-    try {
-      avatarInstance.value.stopSpeak()
-    } catch (e) {
-      console.warn('停止播报失败:', e)
-    }
+  try {
+    avatarService.stopSpeak()
+  } catch (e) {
+    console.warn('停止播报失败:', e)
   }
   if (streamAbortController) {
     streamAbortController.abort()
     streamAbortController = null
   }
   subtitleText.value = ''
+  ttsProgressText.value = ''
   isSpeaking.value = false
 }
 
 async function speakText(text) {
-  if (!avatarInstance.value) {
-    await initAvatar()
-  }
-  if (!avatarInstance.value) return
-
   try {
+    voiceError.value = ''
     subtitleText.value = text
-    avatarInstance.value.speak(text)
+    if (avatarInstance.value) {
+      await avatarInstance.value.speak(text)
+    } else {
+      await avatarService.speak(text)
+    }
   } catch (e) {
     console.error('播报失败:', e)
     subtitleText.value = ''
+    voiceError.value = e.message || '当前浏览器不支持语音播报'
   }
 }
 
@@ -517,6 +565,12 @@ async function handleSend() {
   isReasoning.value = false
   streamingContent.value = ''
   apiKeyError.value = ''
+
+  try {
+    avatarService.prepareSpeech()
+  } catch {
+    // The actual reply path reports unsupported or blocked speech to the user.
+  }
 
   let replyContent = ''
 
@@ -588,6 +642,7 @@ function sendQuickQuestion(q) {
 }
 
 function handleVolumeChange() {
+  avatarService.setVolume(volume.value)
   if (avatarInstance.value) {
     avatarInstance.value.setVolume(volume.value)
   }
@@ -678,23 +733,21 @@ function handleClearApiKey() {
 }
 
 function handleDisconnect() {
-  if (avatarInstance.value) {
-    try {
-      avatarService.disconnect()
-    } catch (e) {
-      console.error('销毁失败:', e)
-    }
-    avatarInstance.value = null
-    avatarStore.reset()
+  try {
+    avatarService.disconnect()
+  } catch (e) {
+    console.error('销毁失败:', e)
   }
+  avatarContainer.value?.querySelectorAll('canvas').forEach((canvas) => canvas.remove())
+  avatarInstance.value = null
+  hasAvatarCanvas.value = false
+  avatarStore.reset()
 }
 
 function handleBeforeUnload() {
-  if (avatarInstance.value) {
-    try {
-      avatarService.disconnect()
-    } catch (e) {
-    }
+  try {
+    avatarService.disconnect()
+  } catch (e) {
   }
 }
 
@@ -735,14 +788,59 @@ async function initializeModels() {
 onMounted(() => {
   if (avatarContainer.value) {
     avatarContainer.value.id = 'avatarBox'
+    if (!avatarService.getInstance()) {
+      avatarContainer.value.querySelectorAll('canvas').forEach((canvas) => canvas.remove())
+    }
+    const syncAvatarCanvasState = () => {
+      hasAvatarCanvas.value = Boolean(avatarContainer.value?.querySelector('canvas'))
+    }
+    syncAvatarCanvasState()
+    avatarCanvasObserver = new MutationObserver(syncAvatarCanvasState)
+    avatarCanvasObserver.observe(avatarContainer.value, { childList: true, subtree: true })
   }
 
   window.addEventListener('beforeunload', handleBeforeUnload)
+  avatarService.setVoiceHandlers({
+    onVoiceStateChange(status) {
+      isSpeaking.value = status === 'start'
+      if (status === 'start') voiceError.value = ''
+      if (status === 'start' || status === 'end') ttsProgressText.value = ''
+      if (status === 'end') subtitleText.value = ''
+    },
+    onVoiceError(message) {
+      voiceError.value = message
+      ttsProgressText.value = ''
+    },
+    onTtsProgress(progress) {
+      const percentage = Number(progress?.progress)
+      const stage = progress?.stage === 'phonemizer' ? '准备中文发音引擎' : '下载本地语音模型'
+      if (Number.isFinite(percentage)) {
+        const normalized = percentage <= 1 ? percentage * 100 : percentage
+        ttsProgressText.value = `${stage}... ${Math.round(normalized)}%`
+      } else {
+        ttsProgressText.value = `${stage}...`
+      }
+    }
+  })
+  loadAvatarConfig()
+    .then((config) => {
+      avatarOptions.value = Array.isArray(config.avatars) && config.avatars.length
+        ? config.avatars
+        : [{ id: 'default', name: '默认人物', url: config.avatarUrl }]
+      if (!avatarOptions.value.some((avatar) => avatar.id === selectedAvatarId.value)) {
+        selectedAvatarId.value = avatarOptions.value[0].id
+      }
+    })
+    .catch((error) => {
+      configError.value = error.message || '人物配置加载失败'
+    })
   initializeModels()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  avatarCanvasObserver?.disconnect()
+  avatarCanvasObserver = null
   handleDisconnect()
 })
 </script>
@@ -789,9 +887,20 @@ onBeforeUnmount(() => {
 }
 
 .empty-avatar {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: #6b7280;
   padding: 20px;
+}
+
+.avatar-ready .empty-avatar {
+  display: none;
 }
 
 .empty-avatar-icon {

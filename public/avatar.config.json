@@ -1,7 +1,40 @@
 {
   "engine": "talkinghead",
   "avatarUrl": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@v1.7.0/avatars/brunette.glb",
+  "avatars": [
+    {
+      "id": "brunette",
+      "name": "Brunette（默认）",
+      "url": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@v1.7.0/avatars/brunette.glb",
+      "license": "Ready Player Me，CC BY-NC 4.0（仅限非商业用途）"
+    },
+    {
+      "id": "mpfb",
+      "name": "MPFB 开源人物",
+      "url": "https://raw.githubusercontent.com/met4citizen/TalkingHead/main/avatars/mpfb.glb",
+      "license": "CC0"
+    },
+    {
+      "id": "vroid",
+      "name": "VRoid 动漫人物",
+      "url": "/avatars/vroid-v1.7.glb",
+      "body": "F",
+      "avatarMood": "neutral",
+      "baseline": {
+        "headRotateX": -0.1,
+        "eyeBlinkLeft": 0.05,
+        "eyeBlinkRight": 0.05
+      },
+      "source": "https://github.com/met4citizen/TalkingHead/blob/main/avatars/vroid.glb",
+      "license": "VRoid Studio，非商业用途"
+    }
+  ],
   "view": "upper",
   "lipsyncLanguage": "zh-CN",
+  "tts": {
+    "engine": "browser",
+    "language": "zh-CN",
+    "preferredVoices": ["婷婷", "Tingting", "普通话", "Mandarin"]
+  },
   "attribution": "TalkingHead 示例模型 brunette.glb：Ready Player Me，CC BY-NC 4.0（仅限非商业用途）"
 }
